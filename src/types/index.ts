@@ -71,7 +71,12 @@ export interface MedicationPlan {
   times: string[]
   startDate: string
   endDate: string
+  /** Paused plans generate no "today" doses until resumed. */
+  paused: boolean
 }
+
+/** Editable fields of a plan (id/paused are managed separately). */
+export type PlanInput = Omit<MedicationPlan, 'id' | 'paused'>
 
 export interface MedicationLog {
   id: string

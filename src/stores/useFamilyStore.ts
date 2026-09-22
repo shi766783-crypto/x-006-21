@@ -10,6 +10,7 @@ import type {
   Medicine,
   MedicationLog,
   MedicationPlan,
+  PlanInput,
   TodayDose,
 } from '../types'
 import { evaluateAchievements } from '../utils/achievements'
@@ -27,10 +28,15 @@ interface FamilyState {
 }
 
 function loadState(): FamilyState {
+  // Plans created before pausing existed have no `paused` field; default to active.
+  const plans: MedicationPlan[] = StorageService.loadPlans().map((p) => ({
+    ...p,
+    paused: p.paused ?? false,
+  }))
   return {
     members: StorageService.loadMembers(),
     medicines: StorageService.loadMedicines(),
-    plans: StorageService.loadPlans(),
+    plans,
     logs: StorageService.loadLogs(),
     records: StorageService.loadRecords(),
     unlockedAchievements: StorageService.loadAchievements(),
@@ -132,8 +138,26 @@ function createStore() {
   }
 
   // ---- medication plans ----
-  function addPlan(plan: Omit<MedicationPlan, 'id'>) {
-    state.plans.push({ ...plan, id: uid() })
+  function addPlan(plan: PlanInput) {
+    state.plans.push({ ...plan, id: uid(), paused: false })
+    commit()
+  }
+
+  /**
+   * Edit dosage / times / date range. Existing medication logs are never
+   * touched: logs at times removed from today's schedule stay in history and
+   * compliance stats and simply stop showing in the today list.
+   */
+  function updatePlan(id: string, patch: PlanInput) {
+    const plan = state.plans.find((p) => p.id === id)
+    if (plan) Object.assign(plan, patch)
+    commit()
+  }
+
+  /** Pause/resume a plan. While paused it generates no today-doses; logs are kept. */
+  function setPlanPaused(id: string, paused: boolean) {
+    const plan = state.plans.find((p) => p.id === id)
+    if (plan) plan.paused = paused
     commit()
   }
 
@@ -193,6 +217,7 @@ function createStore() {
     const today = todayStr()
     const doses: TodayDose[] = []
     for (const plan of state.plans) {
+      if (plan.paused) continue
       if (plan.startDate > today || plan.endDate < today) continue
       const member = state.members.find((m) => m.id === plan.memberId)
       const medicine = state.medicines.find((m) => m.id === plan.medicineId)
@@ -274,6 +299,8 @@ function createStore() {
     cleanExpired,
     getMedicine,
     addPlan,
+    updatePlan,
+    setPlanPaused,
     deletePlan,
     logDose,
     addRecord,

@@ -2,10 +2,11 @@
 import { reactive } from 'vue'
 import { useFamilyStore } from '../../stores/useFamilyStore'
 import type { MedicationPlan } from '../../types'
+import { todayStr } from '../../utils/date'
 
 const props = defineProps<{ plan?: MedicationPlan | null }>()
 const emit = defineEmits<{
-  (e: 'save', data: Omit<MedicationPlan, 'id'>): void
+  (e: 'save', data: Omit<MedicationPlan, 'id' | 'paused'>): void
   (e: 'close'): void
 }>()
 
@@ -19,6 +20,12 @@ const form = reactive({
   startDate: props.plan?.startDate ?? '',
   endDate: props.plan?.endDate ?? '',
 })
+
+// Logs already recorded today for the plan being edited — the user must
+// know how these are preserved before changing dose times.
+const todayLogCount = props.plan
+  ? store.state.logs.filter((l) => l.planId === props.plan!.id && l.date === todayStr()).length
+  : 0
 
 function addTime() {
   form.times.push('12:00')
@@ -44,6 +51,11 @@ function submit() {
 
 <template>
   <div class="form-grid">
+    <div v-if="todayLogCount" class="edit-notice span-2">
+      该计划今日已有 {{ todayLogCount }} 条服药记录：修改剂量或起止日期不影响这些记录；
+      若调整时间点，记录会自动对应到最接近的新时间点（实际服药时间保持不变），
+      实在无法对应的记录也会保留在统计中，不会丢失。
+    </div>
     <div class="form-group">
       <label class="form-label">家庭成员 *</label>
       <select v-model="form.memberId" class="input">
@@ -93,6 +105,15 @@ function submit() {
 </template>
 
 <style scoped>
+.edit-notice {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fef5e7;
+  border: 1px solid var(--warning-color);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+}
 .form-actions {
   display: flex;
   justify-content: flex-end;

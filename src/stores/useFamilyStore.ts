@@ -30,7 +30,8 @@ function loadState(): FamilyState {
   return {
     members: StorageService.loadMembers(),
     medicines: StorageService.loadMedicines(),
-    plans: StorageService.loadPlans(),
+    // Legacy plans predate `paused`; default them to active.
+    plans: StorageService.loadPlans().map((p) => ({ ...p, paused: p.paused ?? false })),
     logs: StorageService.loadLogs(),
     records: StorageService.loadRecords(),
     unlockedAchievements: StorageService.loadAchievements(),
@@ -132,8 +133,59 @@ function createStore() {
   }
 
   // ---- medication plans ----
-  function addPlan(plan: Omit<MedicationPlan, 'id'>) {
-    state.plans.push({ ...plan, id: uid() })
+  function addPlan(plan: Omit<MedicationPlan, 'id' | 'paused'>) {
+    state.plans.push({ ...plan, paused: false, id: uid() })
+    commit()
+  }
+
+  /**
+   * Re-anchor today's logs after a plan's time slots change: logs whose
+   * scheduled time still exists are kept; the rest move to the nearest
+   * unmatched new slot so taken/skipped records stay visible on the today
+   * list. Logs that cannot be matched keep their original time and remain
+   * in history/compliance stats. The actual taken timestamp is never touched.
+   */
+  function remapTodayLogs(plan: MedicationPlan) {
+    const today = todayStr()
+    const logs = state.logs.filter((l) => l.planId === plan.id && l.date === today)
+    const used = new Set<string>()
+    const orphans: MedicationLog[] = []
+    for (const log of logs) {
+      if (plan.times.includes(log.time)) used.add(log.time)
+      else orphans.push(log)
+    }
+    for (const log of orphans) {
+      let best: string | null = null
+      let bestDiff = Infinity
+      const from = timeToMinutes(log.time)
+      for (const t of plan.times) {
+        if (used.has(t)) continue
+        const diff = Math.abs(timeToMinutes(t) - from)
+        if (diff < bestDiff) {
+          bestDiff = diff
+          best = t
+        }
+      }
+      if (best) {
+        log.time = best
+        used.add(best)
+      }
+    }
+  }
+
+  function updatePlan(id: string, patch: Partial<MedicationPlan>) {
+    const plan = state.plans.find((p) => p.id === id)
+    if (!plan) return
+    const timesChanged = patch.times !== undefined && patch.times.join() !== plan.times.join()
+    Object.assign(plan, patch)
+    if (timesChanged) remapTodayLogs(plan)
+    commit()
+  }
+
+  function togglePlanPaused(id: string) {
+    const plan = state.plans.find((p) => p.id === id)
+    if (!plan) return
+    plan.paused = !plan.paused
     commit()
   }
 
@@ -193,6 +245,7 @@ function createStore() {
     const today = todayStr()
     const doses: TodayDose[] = []
     for (const plan of state.plans) {
+      if (plan.paused) continue
       if (plan.startDate > today || plan.endDate < today) continue
       const member = state.members.find((m) => m.id === plan.memberId)
       const medicine = state.medicines.find((m) => m.id === plan.medicineId)
@@ -274,6 +327,8 @@ function createStore() {
     cleanExpired,
     getMedicine,
     addPlan,
+    updatePlan,
+    togglePlanPaused,
     deletePlan,
     logDose,
     addRecord,

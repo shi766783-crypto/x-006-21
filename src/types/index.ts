@@ -71,6 +71,8 @@ export interface MedicationPlan {
   times: string[]
   startDate: string
   endDate: string
+  /** Paused plans stay in the list but generate no doses for today. */
+  paused: boolean
 }
 
 export interface MedicationLog {
